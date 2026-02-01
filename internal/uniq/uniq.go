@@ -27,7 +27,7 @@ func (u *Uniq) Stop() {
 	close(u.done)
 }
 
-func (u *Uniq) Start(ctx context.Context, seed, acc string, users map[string]string) error {
+func (u *Uniq) Start(ctx context.Context, seed string, accounts map[string]map[string]string) error {
 	context.AfterFunc(ctx, u.Stop)
 
 	select {
@@ -58,7 +58,7 @@ func (u *Uniq) Start(ctx context.Context, seed, acc string, users map[string]str
 	defer conn1.Close()
 
 	auth, err := conn1.QueueSubscribe("$SYS.REQ.USER.AUTH", "UNIQUER", func(msg *nats.Msg) {
-		err := conn2.Authentication(ctx, keys, acc, users, msg)
+		err := conn2.Authentication(ctx, keys, accounts, msg)
 		if err != nil {
 			log.Println("Authentication:", err)
 		}
@@ -70,7 +70,7 @@ func (u *Uniq) Start(ctx context.Context, seed, acc string, users map[string]str
 	defer auth.Unsubscribe()
 
 	disc, err := conn1.QueueSubscribe("$SYS.ACCOUNT.*.DISCONNECT", "UNIQUER", func(msg *nats.Msg) {
-		err := conn2.Disconnection(ctx, acc, msg)
+		err := conn2.Disconnection(ctx, accounts, msg)
 		if err != nil {
 			log.Println("Disconnection:", err)
 		}
@@ -91,7 +91,7 @@ type DB struct {
 	*redis.Client
 }
 
-func (db DB) Authentication(ctx context.Context, keys nkeys.KeyPair, acc string, users map[string]string, msg *nats.Msg) error {
+func (db DB) Authentication(ctx context.Context, keys nkeys.KeyPair, accounts map[string]map[string]string, msg *nats.Msg) error {
 	req, err := jwt.DecodeAuthorizationRequestClaims(bytes.NewBuffer(msg.Data).String())
 	if err != nil {
 		return fmt.Errorf("error decode authorization request: %w", err)
@@ -115,7 +115,16 @@ func (db DB) Authentication(ctx context.Context, keys nkeys.KeyPair, acc string,
 	claims := jwt.NewUserClaims(req.UserNkey)
 	claims.Audience = "$G"
 
-	password, ok := users[req.ConnectOptions.Username]
+	var account, password string
+	var ok bool
+	var users map[string]string
+	for account, users = range accounts {
+		password, ok = users[req.ConnectOptions.Username]
+		if ok {
+			break
+		}
+	}
+
 	switch {
 	case req.ConnectOptions.Username != "" && !ok || password != req.ConnectOptions.Password:
 		res.Error = "Authentication Failed"
@@ -132,7 +141,7 @@ func (db DB) Authentication(ctx context.Context, keys nkeys.KeyPair, acc string,
 			break
 		}
 
-		claims.Audience = acc
+		claims.Audience = account
 		fallthrough
 
 	default:
@@ -190,14 +199,15 @@ type Disconnect struct {
 	Reason string `json:"reason"`
 }
 
-func (db DB) Disconnection(ctx context.Context, acc string, msg *nats.Msg) error {
+func (db DB) Disconnection(ctx context.Context, accounts map[string]map[string]string, msg *nats.Msg) error {
 	var req Disconnect
 	err := json.Unmarshal(msg.Data, &req)
 	if err != nil {
 		return err
 	}
 
-	if req.Client.Account != acc {
+	_, ok := accounts[req.Client.Account]
+	if !ok {
 		return nil
 	}
 

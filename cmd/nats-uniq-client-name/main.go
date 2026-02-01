@@ -53,7 +53,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	err := u.Start(ctx, Seed, "APP", map[string]string{"staff": "password"})
+	err := u.Start(ctx, Seed, map[string]map[string]string{"APP": {"staff": "password"}})
 	if err != nil {
 		log.Fatalln(err)
 	}
