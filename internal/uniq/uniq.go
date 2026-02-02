@@ -28,14 +28,6 @@ func (u *Uniq) Stop() {
 }
 
 func (u *Uniq) Start(ctx context.Context, seed string, accounts map[string]map[string]string) error {
-	context.AfterFunc(ctx, u.Stop)
-
-	select {
-	case err := <-u.done:
-		return err
-	default:
-	}
-
 	keys, err := nkeys.FromSeed([]byte(seed))
 	if err != nil {
 		return err
@@ -81,10 +73,7 @@ func (u *Uniq) Start(ctx context.Context, seed string, accounts map[string]map[s
 
 	defer disc.Unsubscribe()
 
-	select {
-	case err = <-u.done:
-		return err
-	}
+	return <-u.done
 }
 
 type DB struct {
@@ -130,11 +119,11 @@ func (db DB) Authentication(ctx context.Context, keys nkeys.KeyPair, accounts ma
 		res.Error = "Authentication Failed"
 
 	case req.ConnectOptions.Username != "":
-		name := fmt.Sprintf("UNIQUER/%s", base64.StdEncoding.EncodeToString([]byte(req.ClientInformation.Name)))
+		key := fmt.Sprintf("UNIQUER/%s", base64.StdEncoding.EncodeToString([]byte(req.ClientInformation.Name)))
 
-		ok, err := db.SetNX(ctx, name, req.ClientInformation.ID, 0).Result()
+		ok, err := db.SetNX(ctx, key, req.ClientInformation.ID, 0).Result()
 		if err != nil {
-			return fmt.Errorf("set %q failed: %w", name, err)
+			return fmt.Errorf("set %q failed: %w", key, err)
 		}
 		if !ok {
 			res.Error = "Unique Client Name Required"
@@ -213,19 +202,19 @@ func (db DB) Disconnection(ctx context.Context, accounts map[string]map[string]s
 
 	log.Println(req)
 
-	name := fmt.Sprintf("UNIQUER/%s", base64.StdEncoding.EncodeToString([]byte(req.Client.Name)))
+	key := fmt.Sprintf("UNIQUER/%s", base64.StdEncoding.EncodeToString([]byte(req.Client.Name)))
 
-	id, err := db.Get(ctx, name).Int()
+	id, err := db.Get(ctx, key).Int()
 	if err != nil {
-		return fmt.Errorf("get %q failed: %w", name, err)
+		return fmt.Errorf("get %q failed: %w", key, err)
 	}
 	if id != req.Client.Id {
-		return fmt.Errorf("mismatch id %d != %d for %q", id, req.Client.Id, name)
+		return fmt.Errorf("mismatch id %d != %d for %q", id, req.Client.Id, key)
 	}
 
-	err = db.Del(ctx, name).Err()
+	err = db.Del(ctx, key).Err()
 	if err != nil {
-		return fmt.Errorf("get %q failed: %w", name, err)
+		return fmt.Errorf("get %q failed: %w", key, err)
 	}
 
 	return nil

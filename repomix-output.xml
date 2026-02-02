@@ -1,0 +1,488 @@
+This file is a merged representation of a subset of the codebase, containing files not matching ignore patterns, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching these patterns are excluded: vendor/**, **/go.sum, **/*.log, bin/**, tmp/**
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+cmd/
+  nats-uniq-client-name/
+    main.go
+internal/
+  uniq/
+    uniq.go
+.gitignore
+go.mod
+LICENSE
+README.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path=".gitignore">
+# If you prefer the allow list template instead of the deny list, see community template:
+# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
+#
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Code coverage profiles and other test artifacts
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
+.env
+
+# Editor/IDE
+# .idea/
+# .vscode/
+</file>
+
+<file path="go.mod">
+module github.com/shvedko/nats-uniq-client-name
+
+go 1.24.12
+
+require (
+	github.com/nats-io/jwt/v2 v2.8.0
+	github.com/nats-io/nats.go v1.48.0
+	github.com/nats-io/nkeys v0.4.15
+	github.com/redis/go-redis/v9 v9.17.3
+)
+
+require (
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+	github.com/klauspost/compress v1.18.0 // indirect
+	github.com/nats-io/nuid v1.0.1 // indirect
+	golang.org/x/crypto v0.47.0 // indirect
+	golang.org/x/sys v0.40.0 // indirect
+)
+</file>
+
+<file path="LICENSE">
+MIT License
+
+Copyright (c) 2026 Pavel Shvedko
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+</file>
+
+<file path="README.md">
+# nats-uniq-client-name
+</file>
+
+<file path="cmd/nats-uniq-client-name/main.go">
+package main
+
+import (
+	"context"
+	"log"
+	"os/signal"
+	"syscall"
+
+	"github.com/nats-io/nats.go"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/shvedko/nats-uniq-client-name/internal/uniq"
+)
+
+/*
+ *	nk -gen account -pubout
+ *
+ *	accounts {
+ *	  SYS {
+ *		users: [ { user: admin, password: password } ]
+ *	  }
+ *	  APP { }
+ *	}
+ *
+ *	system_account: SYS
+ *
+ *	authorization {
+ *	  auth_callout {
+ *		issuer: AA3MCC7NAP5TM6TJFOYHSWAKLBNUFM3MTCRV6H6XD2ZNRRZ2KFTUUV6Z
+ *		auth_users: [ admin ]
+ *		account: SYS
+ *	  }
+ *	}
+ *
+ */
+
+const Seed = "SAAGYA5HIPHPB2NZTTZTF5BGX6YNLGLMXIYPUPNJPIN7Z4QQSTCGT3NFRY"
+
+func main() {
+	u := uniq.New(
+		nats.Options{
+			Servers:              []string{"nats:4222"},
+			AllowReconnect:       true,
+			RetryOnFailedConnect: true,
+			UserInfo: func() (string, string) {
+				return "admin", "password"
+			},
+		}, redis.Options{
+			Addr:     "redis:6379",
+			Protocol: 2,
+		})
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+
+	err := u.Start(ctx, Seed, map[string]map[string]string{"APP": {"staff": "password"}})
+	if err != nil {
+		log.Fatalln(err)
+	}
+}
+</file>
+
+<file path="internal/uniq/uniq.go">
+package uniq
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"log"
+	"strings"
+	"time"
+
+	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nkeys"
+
+	"github.com/redis/go-redis/v9"
+)
+
+type Uniq struct {
+	options1 nats.Options
+	options2 redis.Options
+	done     chan error
+}
+
+func (u *Uniq) Stop() {
+	close(u.done)
+}
+
+func (u *Uniq) Start(ctx context.Context, seed string, accounts map[string]map[string]string) error {
+	context.AfterFunc(ctx, u.Stop)
+
+	select {
+	case err := <-u.done:
+		return err
+	default:
+	}
+
+	keys, err := nkeys.FromSeed([]byte(seed))
+	if err != nil {
+		return err
+	}
+
+	conn2 := DB{Client: redis.NewClient(&u.options2)}
+
+	defer conn2.Close()
+
+	err = conn2.Ping(ctx).Err()
+	if err != nil {
+		return err
+	}
+
+	conn1, err := u.options1.Connect()
+	if err != nil {
+		return err
+	}
+
+	defer conn1.Close()
+
+	auth, err := conn1.QueueSubscribe("$SYS.REQ.USER.AUTH", "UNIQUER", func(msg *nats.Msg) {
+		err := conn2.Authentication(ctx, keys, accounts, msg)
+		if err != nil {
+			log.Println("Authentication:", err)
+		}
+	})
+	if err != nil {
+		return err
+	}
+
+	defer auth.Unsubscribe()
+
+	disc, err := conn1.QueueSubscribe("$SYS.ACCOUNT.*.DISCONNECT", "UNIQUER", func(msg *nats.Msg) {
+		err := conn2.Disconnection(ctx, accounts, msg)
+		if err != nil {
+			log.Println("Disconnection:", err)
+		}
+	})
+	if err != nil {
+		return err
+	}
+
+	defer disc.Unsubscribe()
+
+	select {
+	case err = <-u.done:
+		return err
+	}
+}
+
+type DB struct {
+	*redis.Client
+}
+
+func (db DB) Authentication(ctx context.Context, keys nkeys.KeyPair, accounts map[string]map[string]string, msg *nats.Msg) error {
+	req, err := jwt.DecodeAuthorizationRequestClaims(bytes.NewBuffer(msg.Data).String())
+	if err != nil {
+		return fmt.Errorf("error decode authorization request: %w", err)
+	}
+
+	if !strings.HasPrefix(req.Issuer, "N") {
+		return fmt.Errorf("bad request: expected server: %q", req.Issuer)
+	}
+	if req.Issuer != req.Server.ID {
+		return fmt.Errorf("bad request: issuers don't match: %q != %q", req.Issuer, req.Server.ID)
+	}
+	if req.Audience != "nats-authorization-request" {
+		return fmt.Errorf("bad request: unexpected audience: %q", req.Audience)
+	}
+
+	log.Println(req)
+
+	res := jwt.NewAuthorizationResponseClaims(req.UserNkey)
+	res.Audience = req.Server.ID
+
+	claims := jwt.NewUserClaims(req.UserNkey)
+	claims.Audience = "$G"
+
+	var account, password string
+	var ok bool
+	var users map[string]string
+	for account, users = range accounts {
+		password, ok = users[req.ConnectOptions.Username]
+		if ok {
+			break
+		}
+	}
+
+	switch {
+	case req.ConnectOptions.Username != "" && !ok || password != req.ConnectOptions.Password:
+		res.Error = "Authentication Failed"
+
+	case req.ConnectOptions.Username != "":
+		name := fmt.Sprintf("UNIQUER/%s", base64.StdEncoding.EncodeToString([]byte(req.ClientInformation.Name)))
+
+		ok, err := db.SetNX(ctx, name, req.ClientInformation.ID, 0).Result()
+		if err != nil {
+			return fmt.Errorf("set %q failed: %w", name, err)
+		}
+		if !ok {
+			res.Error = "Unique Client Name Required"
+			break
+		}
+
+		claims.Audience = account
+		fallthrough
+
+	default:
+		token, err := claims.Encode(keys)
+		if err != nil {
+			return fmt.Errorf("error encode token: %w", err)
+		}
+		res.Jwt = token
+	}
+
+	data, err := res.Encode(keys)
+	if err != nil {
+		return fmt.Errorf("error encode response: %w", err)
+	}
+
+	return msg.Respond([]byte(data))
+}
+
+type Disconnect struct {
+	Type      string    `json:"type"`
+	Id        string    `json:"id"`
+	Timestamp time.Time `json:"timestamp"`
+	Server    struct {
+		Name      string    `json:"name"`
+		Host      string    `json:"host"`
+		Id        string    `json:"id"`
+		Ver       string    `json:"ver"`
+		JetStream bool      `json:"jetstream"`
+		Flags     int       `json:"flags"`
+		Seq       int       `json:"seq"`
+		Time      time.Time `json:"time"`
+	} `json:"server"`
+	Client struct {
+		Start      time.Time `json:"start"`
+		Host       string    `json:"host"`
+		Id         int       `json:"id"`
+		Account    string    `json:"acc"`
+		Name       string    `json:"name"`
+		Lang       string    `json:"lang"`
+		Ver        string    `json:"ver"`
+		Rtt        int       `json:"rtt"`
+		Stop       time.Time `json:"stop"`
+		IssuerKey  string    `json:"issuer_key"`
+		Kind       string    `json:"kind"`
+		ClientType string    `json:"client_type"`
+	} `json:"client"`
+	Sent struct {
+		Messages int `json:"msgs"`
+		Bytes    int `json:"bytes"`
+	} `json:"sent"`
+	Received struct {
+		Messages int `json:"msgs"`
+		Bytes    int `json:"bytes"`
+	} `json:"received"`
+	Reason string `json:"reason"`
+}
+
+func (db DB) Disconnection(ctx context.Context, accounts map[string]map[string]string, msg *nats.Msg) error {
+	var req Disconnect
+	err := json.Unmarshal(msg.Data, &req)
+	if err != nil {
+		return err
+	}
+
+	_, ok := accounts[req.Client.Account]
+	if !ok {
+		return nil
+	}
+
+	log.Println(req)
+
+	name := fmt.Sprintf("UNIQUER/%s", base64.StdEncoding.EncodeToString([]byte(req.Client.Name)))
+
+	id, err := db.Get(ctx, name).Int()
+	if err != nil {
+		return fmt.Errorf("get %q failed: %w", name, err)
+	}
+	if id != req.Client.Id {
+		return fmt.Errorf("mismatch id %d != %d for %q", id, req.Client.Id, name)
+	}
+
+	err = db.Del(ctx, name).Err()
+	if err != nil {
+		return fmt.Errorf("get %q failed: %w", name, err)
+	}
+
+	return nil
+}
+
+func New(options1 nats.Options, options2 redis.Options) *Uniq {
+	options1.AllowReconnect = true
+
+	if options1.MaxReconnect == 0 {
+		options1.MaxReconnect = nats.DefaultMaxReconnect
+	}
+	if options1.ReconnectWait == 0 {
+		options1.ReconnectWait = nats.DefaultReconnectWait
+	}
+	if options1.ReconnectJitter == 0 {
+		options1.ReconnectJitter = nats.DefaultReconnectJitter
+	}
+	if options1.ReconnectJitterTLS == 0 {
+		options1.ReconnectJitterTLS = nats.DefaultReconnectJitterTLS
+	}
+	if options1.Timeout == 0 {
+		options1.Timeout = nats.DefaultTimeout
+	}
+	if options1.PingInterval == 0 {
+		options1.PingInterval = nats.DefaultPingInterval
+	}
+	if options1.MaxPingsOut == 0 {
+		options1.MaxPingsOut = nats.DefaultMaxPingOut
+	}
+	if options1.SubChanLen == 0 {
+		options1.SubChanLen = nats.DefaultMaxChanLen
+	}
+	if options1.ReconnectBufSize == 0 {
+		options1.ReconnectBufSize = nats.DefaultReconnectBufSize
+	}
+	if options1.DrainTimeout == 0 {
+		options1.DrainTimeout = nats.DefaultDrainTimeout
+	}
+	if options1.FlusherTimeout == 0 {
+		options1.FlusherTimeout = nats.DefaultFlusherTimeout
+	}
+
+	options1.Name = "UNIQUER"
+
+	return &Uniq{
+		options1: options1,
+		options2: options2,
+		done:     make(chan error),
+	}
+}
+</file>
+
+</files>

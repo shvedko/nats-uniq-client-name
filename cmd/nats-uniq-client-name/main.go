@@ -2,12 +2,11 @@ package main
 
 import (
 	"context"
+	"github.com/nats-io/nats.go"
+	"github.com/redis/go-redis/v9"
 	"log"
 	"os/signal"
 	"syscall"
-
-	"github.com/nats-io/nats.go"
-	"github.com/redis/go-redis/v9"
 
 	"github.com/shvedko/nats-uniq-client-name/internal/uniq"
 )
@@ -52,6 +51,8 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+
+	context.AfterFunc(ctx, u.Stop)
 
 	err := u.Start(ctx, Seed, map[string]map[string]string{"APP": {"staff": "password"}})
 	if err != nil {
